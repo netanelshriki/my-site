@@ -4578,3 +4578,5 @@ document.head.appendChild(styleElement);
 const rootElement = document.getElementById('root');
 const root = createRoot(rootElement);
 root.render(<App />);
+
+export default App;
