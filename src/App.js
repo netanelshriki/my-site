@@ -1,10 +1,10 @@
-import React, { useState, useEffect, createContext, useContext, useRef, useMemo } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef, useMemo, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { HashRouter as Router, Routes, Route, Link, useParams, useNavigate, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Link, useParams, useNavigate, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
-import jwt_decode from 'jwt-decode';
+import {jwtDecode as jwt_decode} from 'jwt-decode';
 import { v4 as uuidv4 } from 'uuid';
 
 // ==============================================
@@ -156,6 +156,9 @@ const styles = `
     padding: 1rem 0;
     border-bottom: 1px solid var(--gray-200);
     background-color: var(--white);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
   }
 
   .navbar-brand {
@@ -222,6 +225,30 @@ const styles = `
     background-color: var(--danger);
     color: var(--white);
     border: 1px solid var(--danger);
+  }
+
+  .btn-success {
+    background-color: var(--success);
+    color: var(--white);
+    border: 1px solid var(--success);
+  }
+
+  .btn-warning {
+    background-color: var(--warning);
+    color: var(--dark);
+    border: 1px solid var(--warning);
+  }
+
+  .btn-info {
+    background-color: var(--info);
+    color: var(--white);
+    border: 1px solid var(--info);
+  }
+
+  .btn-secondary {
+    background-color: var(--secondary);
+    color: var(--white);
+    border: 1px solid var(--secondary);
   }
 
   .btn-sm {
@@ -1129,6 +1156,124 @@ const styles = `
     outline: 0;
     box-shadow: 0 0 0 0.2rem rgba(26, 115, 232, 0.25);
   }
+  
+  /* Avatar fallback */
+  .avatar-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    background-color: var(--primary);
+    color: var(--white);
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  
+  /* Role styles */
+  .role-badge {
+    display: inline-block;
+    padding: 0.25em 0.5em;
+    border-radius: var(--border-radius);
+    margin-left: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+  
+  .role-admin {
+    background-color: var(--danger);
+    color: var(--white);
+  }
+  
+  .role-editor {
+    background-color: var(--info);
+    color: var(--white);
+  }
+  
+  .role-writer {
+    background-color: var(--primary);
+    color: var(--white);
+  }
+  
+  .role-moderator {
+    background-color: var(--warning);
+    color: var(--dark);
+  }
+  
+  .role-reader {
+    background-color: var(--secondary);
+    color: var(--white);
+  }
+
+  /* Admin dashboard */
+  .admin-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  
+  .stat-card {
+    background-color: var(--white);
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    padding: 1.5rem;
+    text-align: center;
+  }
+  
+  .stat-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+  
+  .stat-label {
+    font-size: 1.1rem;
+    color: var(--gray-600);
+  }
+  
+  .admin-tabs {
+    display: flex;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--gray-300);
+  }
+  
+  .admin-tab {
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-weight: 500;
+  }
+  
+  .admin-tab.active {
+    border-bottom-color: var(--primary);
+    color: var(--primary);
+  }
+  
+  /* Permissions editor */
+  .permissions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .permission-item {
+    border: 1px solid var(--gray-300);
+    border-radius: var(--border-radius);
+    padding: 1rem;
+  }
+  
+  .permission-title {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  
+  .permission-description {
+    font-size: 0.875rem;
+    color: var(--gray-600);
+    margin-bottom: 1rem;
+  }
 
   /* Responsive */
   @media (max-width: 768px) {
@@ -1164,6 +1309,10 @@ const styles = `
     .col-md-6 {
       flex: 0 0 100%;
       max-width: 100%;
+    }
+    
+    .admin-stats {
+      grid-template-columns: 1fr;
     }
   }
 
@@ -1217,6 +1366,82 @@ const styles = `
 // CONTEXT PROVIDERS
 // ==============================================
 
+// Define all available roles with their permissions
+const ROLES = {
+  ADMIN: 'admin',
+  EDITOR: 'editor',
+  WRITER: 'writer',
+  MODERATOR: 'moderator',
+  READER: 'reader'
+};
+
+// Define permissions
+const PERMISSIONS = {
+  CREATE_ARTICLE: 'create_article',
+  EDIT_ANY_ARTICLE: 'edit_any_article',
+  EDIT_OWN_ARTICLE: 'edit_own_article',
+  DELETE_ANY_ARTICLE: 'delete_any_article',
+  DELETE_OWN_ARTICLE: 'delete_own_article',
+  CREATE_COMMENT: 'create_comment',
+  EDIT_ANY_COMMENT: 'edit_any_comment',
+  EDIT_OWN_COMMENT: 'edit_own_comment',
+  DELETE_ANY_COMMENT: 'delete_any_comment',
+  DELETE_OWN_COMMENT: 'delete_own_comment',
+  MANAGE_USERS: 'manage_users',
+  MANAGE_ROLES: 'manage_roles',
+  MANAGE_TAGS: 'manage_tags',
+  MANAGE_SETTINGS: 'manage_settings'
+};
+
+// Role permissions map
+const DEFAULT_ROLE_PERMISSIONS = {
+  [ROLES.ADMIN]: [
+    PERMISSIONS.CREATE_ARTICLE,
+    PERMISSIONS.EDIT_ANY_ARTICLE,
+    PERMISSIONS.EDIT_OWN_ARTICLE,
+    PERMISSIONS.DELETE_ANY_ARTICLE,
+    PERMISSIONS.DELETE_OWN_ARTICLE,
+    PERMISSIONS.CREATE_COMMENT,
+    PERMISSIONS.EDIT_ANY_COMMENT,
+    PERMISSIONS.EDIT_OWN_COMMENT,
+    PERMISSIONS.DELETE_ANY_COMMENT,
+    PERMISSIONS.DELETE_OWN_COMMENT,
+    PERMISSIONS.MANAGE_USERS,
+    PERMISSIONS.MANAGE_ROLES,
+    PERMISSIONS.MANAGE_TAGS,
+    PERMISSIONS.MANAGE_SETTINGS
+  ],
+  [ROLES.EDITOR]: [
+    PERMISSIONS.CREATE_ARTICLE,
+    PERMISSIONS.EDIT_ANY_ARTICLE,
+    PERMISSIONS.EDIT_OWN_ARTICLE,
+    PERMISSIONS.DELETE_OWN_ARTICLE,
+    PERMISSIONS.CREATE_COMMENT,
+    PERMISSIONS.EDIT_OWN_COMMENT,
+    PERMISSIONS.DELETE_OWN_COMMENT
+  ],
+  [ROLES.WRITER]: [
+    PERMISSIONS.CREATE_ARTICLE,
+    PERMISSIONS.EDIT_OWN_ARTICLE,
+    PERMISSIONS.DELETE_OWN_ARTICLE,
+    PERMISSIONS.CREATE_COMMENT,
+    PERMISSIONS.EDIT_OWN_COMMENT,
+    PERMISSIONS.DELETE_OWN_COMMENT
+  ],
+  [ROLES.MODERATOR]: [
+    PERMISSIONS.CREATE_COMMENT,
+    PERMISSIONS.EDIT_ANY_COMMENT,
+    PERMISSIONS.DELETE_ANY_COMMENT,
+    PERMISSIONS.EDIT_OWN_COMMENT,
+    PERMISSIONS.DELETE_OWN_COMMENT
+  ],
+  [ROLES.READER]: [
+    PERMISSIONS.CREATE_COMMENT,
+    PERMISSIONS.EDIT_OWN_COMMENT,
+    PERMISSIONS.DELETE_OWN_COMMENT
+  ]
+};
+
 // AppContext - Holds the main state for the application
 const AppContext = createContext();
 
@@ -1253,6 +1478,25 @@ const AppProvider = ({ children }) => {
   
   const [notifications, setNotifications] = useState([]);
 
+  const [rolePermissions, setRolePermissions] = useState(() => {
+    const savedRolePermissions = localStorage.getItem('rolePermissions');
+    return savedRolePermissions ? JSON.parse(savedRolePermissions) : DEFAULT_ROLE_PERMISSIONS;
+  });
+
+  const [settings, setSettings] = useState(() => {
+    const savedSettings = localStorage.getItem('settings');
+    return savedSettings ? JSON.parse(savedSettings) : {
+      siteName: 'CodeBlog',
+      siteDescription: 'A platform for developers to share knowledge and insights.',
+      logoUrl: '',
+      allowRegistration: true,
+      requireEmailVerification: false,
+      enableComments: true,
+      articlesPerPage: 6,
+      defaultUserRole: ROLES.READER
+    };
+  });
+
   useEffect(() => {
     localStorage.setItem('articles', JSON.stringify(articles));
   }, [articles]);
@@ -1281,6 +1525,14 @@ const AppProvider = ({ children }) => {
       localStorage.removeItem('currentUser');
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    localStorage.setItem('rolePermissions', JSON.stringify(rolePermissions));
+  }, [rolePermissions]);
+
+  useEffect(() => {
+    localStorage.setItem('settings', JSON.stringify(settings));
+  }, [settings]);
 
   // Toggle theme
   const toggleTheme = () => {
@@ -1312,7 +1564,7 @@ const AppProvider = ({ children }) => {
     const newUser = {
       id: uuidv4(),
       ...userData,
-      role: 'reader',
+      role: settings.defaultUserRole,
       createdAt: new Date().toISOString()
     };
     
@@ -1400,6 +1652,18 @@ const AppProvider = ({ children }) => {
     
     setComments(prevComments => [...prevComments, newComment]);
     addNotification('Success', 'Comment added successfully!', 'success');
+    return newComment.id;
+  };
+
+  const updateComment = (id, content) => {
+    setComments(prevComments => 
+      prevComments.map(comment => 
+        comment.id === id 
+          ? { ...comment, content, updatedAt: new Date().toISOString() } 
+          : comment
+      )
+    );
+    addNotification('Success', 'Comment updated successfully!', 'success');
   };
 
   const deleteComment = (id) => {
@@ -1427,6 +1691,34 @@ const AppProvider = ({ children }) => {
     return true;
   };
 
+  const updateTag = (id, name) => {
+    setTags(prevTags => 
+      prevTags.map(tag => 
+        tag.id === id 
+          ? { ...tag, name } 
+          : tag
+      )
+    );
+    addNotification('Success', 'Tag updated successfully!', 'success');
+  };
+
+  const deleteTag = (id) => {
+    // Remove tag from articles
+    const tagToDelete = tags.find(tag => tag.id === id);
+    if (tagToDelete) {
+      setArticles(prevArticles => 
+        prevArticles.map(article => ({
+          ...article,
+          tags: article.tags.filter(tag => tag !== tagToDelete.name)
+        }))
+      );
+    }
+    
+    // Delete tag
+    setTags(prevTags => prevTags.filter(tag => tag.id !== id));
+    addNotification('Success', 'Tag deleted successfully!', 'success');
+  };
+
   const incrementTagCount = (tagName) => {
     setTags(prevTags => 
       prevTags.map(tag => 
@@ -1448,6 +1740,59 @@ const AppProvider = ({ children }) => {
   };
 
   // User functions
+  const addUser = (userData) => {
+    if (users.some(u => u.email === userData.email)) {
+      return false;
+    }
+    
+    const newUser = {
+      id: uuidv4(),
+      ...userData,
+      createdAt: new Date().toISOString()
+    };
+    
+    setUsers(prevUsers => [...prevUsers, newUser]);
+    addNotification('Success', 'User added successfully!', 'success');
+    return true;
+  };
+
+  const updateUser = (id, userData) => {
+    setUsers(prevUsers => 
+      prevUsers.map(user => 
+        user.id === id 
+          ? { ...user, ...userData } 
+          : user
+      )
+    );
+    
+    // Update current user if it's the same user
+    if (currentUser && currentUser.id === id) {
+      const updatedUser = users.find(user => user.id === id);
+      if (updatedUser) {
+        const { password, ...userWithoutPassword } = updatedUser;
+        setCurrentUser({ ...userWithoutPassword, ...userData });
+      }
+    }
+    
+    addNotification('Success', 'User updated successfully!', 'success');
+  };
+
+  const deleteUser = (id) => {
+    // Delete user's articles
+    const userArticles = articles.filter(article => article.userId === id);
+    userArticles.forEach(article => {
+      deleteArticle(article.id);
+    });
+    
+    // Delete user's comments
+    setComments(prevComments => prevComments.filter(comment => comment.userId !== id));
+    
+    // Delete user
+    setUsers(prevUsers => prevUsers.filter(user => user.id !== id));
+    
+    addNotification('Success', 'User deleted successfully!', 'success');
+  };
+
   const updateUserRole = (userId, role) => {
     setUsers(prevUsers => 
       prevUsers.map(user => 
@@ -1487,6 +1832,64 @@ const AppProvider = ({ children }) => {
     );
   };
 
+  // Role and permission functions
+  const createRole = (role, permissions) => {
+    setRolePermissions(prev => ({
+      ...prev,
+      [role]: permissions
+    }));
+    addNotification('Success', `Role '${role}' created successfully!`, 'success');
+  };
+
+  const updateRolePermissions = (role, permissions) => {
+    setRolePermissions(prev => ({
+      ...prev,
+      [role]: permissions
+    }));
+    addNotification('Success', `Permissions for role '${role}' updated successfully!`, 'success');
+  };
+
+  const deleteRole = (role) => {
+    // Check if any users have this role
+    const usersWithRole = users.filter(user => user.role === role);
+    if (usersWithRole.length > 0) {
+      // Change users' role to reader (or default role)
+      setUsers(prevUsers => 
+        prevUsers.map(user => 
+          user.role === role 
+            ? { ...user, role: ROLES.READER } 
+            : user
+        )
+      );
+    }
+    
+    // Delete role
+    setRolePermissions(prev => {
+      const { [role]: removedRole, ...rest } = prev;
+      return rest;
+    });
+    
+    addNotification('Success', `Role '${role}' deleted successfully!`, 'success');
+  };
+
+  const hasPermission = (permission) => {
+    if (!currentUser) return false;
+    
+    const userRole = currentUser.role;
+    const permissions = rolePermissions[userRole] || [];
+    
+    return permissions.includes(permission);
+  };
+
+  // Settings functions
+  const updateSettings = (newSettings) => {
+    setSettings(prev => ({
+      ...prev,
+      ...newSettings
+    }));
+    addNotification('Success', 'Settings updated successfully!', 'success');
+  };
+
   // Notification functions
   const addNotification = (title, message, type = 'info') => {
     const id = uuidv4();
@@ -1501,33 +1904,81 @@ const AppProvider = ({ children }) => {
   // Check permissions
   const canEditArticle = (articleUserId) => {
     if (!currentUser) return false;
-    if (currentUser.role === 'admin') return true;
-    if (currentUser.id === articleUserId) return true;
+    if (hasPermission(PERMISSIONS.EDIT_ANY_ARTICLE)) return true;
+    if (currentUser.id === articleUserId && hasPermission(PERMISSIONS.EDIT_OWN_ARTICLE)) return true;
     return false;
   };
 
   const canDeleteArticle = (articleUserId) => {
     if (!currentUser) return false;
-    if (currentUser.role === 'admin') return true;
-    if (currentUser.id === articleUserId) return true;
-    return false;
-  };
-
-  const canDeleteComment = (commentUserId) => {
-    if (!currentUser) return false;
-    if (currentUser.role === 'admin') return true;
-    if (currentUser.id === commentUserId) return true;
+    if (hasPermission(PERMISSIONS.DELETE_ANY_ARTICLE)) return true;
+    if (currentUser.id === articleUserId && hasPermission(PERMISSIONS.DELETE_OWN_ARTICLE)) return true;
     return false;
   };
 
   const canCreateArticle = () => {
     if (!currentUser) return false;
-    return ['admin', 'writer'].includes(currentUser.role);
+    return hasPermission(PERMISSIONS.CREATE_ARTICLE);
+  };
+
+  const canEditComment = (commentUserId) => {
+    if (!currentUser) return false;
+    if (hasPermission(PERMISSIONS.EDIT_ANY_COMMENT)) return true;
+    if (currentUser.id === commentUserId && hasPermission(PERMISSIONS.EDIT_OWN_COMMENT)) return true;
+    return false;
+  };
+
+  const canDeleteComment = (commentUserId) => {
+    if (!currentUser) return false;
+    if (hasPermission(PERMISSIONS.DELETE_ANY_COMMENT)) return true;
+    if (currentUser.id === commentUserId && hasPermission(PERMISSIONS.DELETE_OWN_COMMENT)) return true;
+    return false;
   };
 
   const canManageUsers = () => {
     if (!currentUser) return false;
-    return currentUser.role === 'admin';
+    return hasPermission(PERMISSIONS.MANAGE_USERS);
+  };
+
+  const canManageRoles = () => {
+    if (!currentUser) return false;
+    return hasPermission(PERMISSIONS.MANAGE_ROLES);
+  };
+
+  const canManageTags = () => {
+    if (!currentUser) return false;
+    return hasPermission(PERMISSIONS.MANAGE_TAGS);
+  };
+
+  const canManageSettings = () => {
+    if (!currentUser) return false;
+    return hasPermission(PERMISSIONS.MANAGE_SETTINGS);
+  };
+
+  // Stats functions
+  const getStats = () => {
+    return {
+      totalArticles: articles.length,
+      totalUsers: users.length,
+      totalComments: comments.length,
+      totalTags: tags.length,
+      articleViews: articles.reduce((total, article) => total + article.views, 0),
+      articleLikes: articles.reduce((total, article) => total + article.likes, 0),
+      topArticles: [...articles]
+        .sort((a, b) => b.views - a.views)
+        .slice(0, 5),
+      topAuthors: [...users]
+        .map(user => ({
+          id: user.id,
+          name: user.name,
+          articlesCount: articles.filter(article => article.userId === user.id).length
+        }))
+        .sort((a, b) => b.articlesCount - a.articlesCount)
+        .slice(0, 5),
+      popularTags: [...tags]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10)
+    };
   };
 
   return (
@@ -1539,6 +1990,10 @@ const AppProvider = ({ children }) => {
       theme,
       currentUser,
       notifications,
+      rolePermissions,
+      settings,
+      ROLES,
+      PERMISSIONS,
       toggleTheme,
       login,
       logout,
@@ -1550,20 +2005,36 @@ const AppProvider = ({ children }) => {
       incrementArticleViews,
       toggleArticleLike,
       addComment,
+      updateComment,
       deleteComment,
       getArticleComments,
       addTag,
+      updateTag,
+      deleteTag,
       incrementTagCount,
       decrementTagCount,
+      addUser,
+      updateUser,
+      deleteUser,
       updateUserRole,
       updateUserProfile,
       searchArticles,
+      createRole,
+      updateRolePermissions,
+      deleteRole,
+      hasPermission,
+      updateSettings,
       addNotification,
       canEditArticle,
       canDeleteArticle,
-      canDeleteComment,
       canCreateArticle,
-      canManageUsers
+      canEditComment,
+      canDeleteComment,
+      canManageUsers,
+      canManageRoles,
+      canManageTags,
+      canManageSettings,
+      getStats
     }}>
       {children}
     </AppContext.Provider>
@@ -1583,7 +2054,7 @@ const useAppContext = () => {
 const AuthContext = createContext();
 
 const AuthProvider = ({ children }) => {
-  const { currentUser, login, logout, register } = useAppContext();
+  const { currentUser, login, logout, register, hasPermission } = useAppContext();
   
   const isAuthenticated = !!currentUser;
   
@@ -1592,15 +2063,11 @@ const AuthProvider = ({ children }) => {
     return currentUser.role === role;
   };
   
-  const isAdmin = () => hasRole('admin');
-  const isWriter = () => hasRole('admin') || hasRole('writer');
-  
   return (
     <AuthContext.Provider value={{
       isAuthenticated,
       hasRole,
-      isAdmin,
-      isWriter,
+      hasPermission,
       login,
       logout,
       register,
@@ -1627,6 +2094,18 @@ const useAuth = () => {
 // Format date to readable format
 const formatDate = (dateString) => {
   const options = { year: 'numeric', month: 'long', day: 'numeric' };
+  return new Date(dateString).toLocaleDateString(undefined, options);
+};
+
+// Format date with time
+const formatDateTime = (dateString) => {
+  const options = { 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  };
   return new Date(dateString).toLocaleDateString(undefined, options);
 };
 
@@ -1679,9 +2158,67 @@ const extractToc = (markdown) => {
   return toc;
 };
 
-// Generate random avatar URL
-const getRandomAvatar = (seed) => {
-  return `https://i.pravatar.cc/150?u=${seed}`;
+// Generate avatar content
+const getAvatarContent = (name) => {
+  if (!name) return '';
+  
+  const parts = name.split(' ');
+  if (parts.length === 1) {
+    return name.charAt(0);
+  }
+  
+  return parts[0].charAt(0) + parts[parts.length - 1].charAt(0);
+};
+
+// Generate random avatar URL with fallback
+const getAvatar = (seed, name) => {
+  try {
+    return `https://i.pravatar.cc/150?u=${seed}`;
+  } catch (error) {
+    console.error('Avatar service error:', error);
+    return null;
+  }
+};
+
+// Get avatar component with fallback
+const Avatar = ({ userId, name, size = 'md', className = '' }) => {
+  const [error, setError] = useState(false);
+  const avatarSizes = {
+    sm: '32px',
+    md: '48px',
+    lg: '96px',
+    xl: '150px'
+  };
+  
+  const avatarStyle = {
+    width: avatarSizes[size] || avatarSizes.md,
+    height: avatarSizes[size] || avatarSizes.md,
+    borderRadius: '50%',
+    overflow: 'hidden'
+  };
+  
+  if (error) {
+    return (
+      <div 
+        className={`avatar-fallback ${className}`} 
+        style={avatarStyle}
+        title={name}
+      >
+        {getAvatarContent(name)}
+      </div>
+    );
+  }
+  
+  return (
+    <img 
+      src={getAvatar(userId, name)}
+      alt={name} 
+      className={className}
+      style={avatarStyle}
+      onError={() => setError(true)}
+      title={name}
+    />
+  );
 };
 
 // Token handling for JWT
@@ -1712,6 +2249,11 @@ const isTokenExpired = (token) => {
   return decoded.exp < currentTime;
 };
 
+// Role display name
+const getRoleDisplayName = (role) => {
+  return role.charAt(0).toUpperCase() + role.slice(1);
+};
+
 // ==============================================
 // ROUTE PROTECTION COMPONENTS
 // ==============================================
@@ -1728,32 +2270,16 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
-// Admin Route component
-const AdminRoute = ({ children }) => {
-  const { isAuthenticated, isAdmin } = useAuth();
+// Permission Route component
+const PermissionRoute = ({ permission, children }) => {
+  const { isAuthenticated, hasPermission } = useAuth();
   const location = window.location.pathname;
   
   if (!isAuthenticated) {
     return <Navigate to={`/login?redirect=${location}`} />;
   }
   
-  if (!isAdmin()) {
-    return <Navigate to="/" />;
-  }
-  
-  return children;
-};
-
-// Writer Route component
-const WriterRoute = ({ children }) => {
-  const { isAuthenticated, isWriter } = useAuth();
-  const location = window.location.pathname;
-  
-  if (!isAuthenticated) {
-    return <Navigate to={`/login?redirect=${location}`} />;
-  }
-  
-  if (!isWriter()) {
+  if (!hasPermission(permission)) {
     return <Navigate to="/" />;
   }
   
@@ -1792,6 +2318,10 @@ const useForm = (initialValues = {}, validate) => {
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setValues(initialValues);
+  }, [initialValues]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -1930,6 +2460,12 @@ const useDebounce = (value, delay) => {
   }, [value, delay]);
 
   return debouncedValue;
+};
+
+// Hook for query params
+const useQueryParam = (param) => {
+  const [searchParams] = useSearchParams();
+  return searchParams.get(param);
 };
 
 // ==============================================
@@ -2151,8 +2687,42 @@ const Select = ({
   );
 };
 
+// Checkbox component
+const Checkbox = ({ 
+  label, 
+  name, 
+  checked, 
+  onChange, 
+  error,
+  touched,
+  helperText,
+  ...rest 
+}) => {
+  return (
+    <div className="form-group">
+      <div className="form-check">
+        <input
+          type="checkbox"
+          className="form-check-input"
+          id={name}
+          name={name}
+          checked={checked}
+          onChange={onChange}
+          {...rest}
+        />
+        <label className="form-check-label" htmlFor={name}>
+          {label}
+        </label>
+      </div>
+      
+      {touched && error && <div className="text-danger mt-1">{error}</div>}
+      {helperText && <small className="form-text">{helperText}</small>}
+    </div>
+  );
+};
+
 // Modal component
-const Modal = ({ isOpen, onClose, title, children, footer }) => {
+const Modal = ({ isOpen, onClose, title, children, footer, size = 'md' }) => {
   if (!isOpen) return null;
   
   // Close modal when clicking outside
@@ -2186,9 +2756,17 @@ const Modal = ({ isOpen, onClose, title, children, footer }) => {
     };
   }, []);
   
+  // Size classes
+  const sizeClasses = {
+    sm: 'max-width: 400px',
+    md: 'max-width: 500px',
+    lg: 'max-width: 800px',
+    xl: 'max-width: 1000px'
+  };
+  
   return (
     <div className="modal-backdrop" onClick={handleBackdropClick}>
-      <div className="modal">
+      <div className="modal" style={{ [sizeClasses[size]]: true }}>
         <div className="modal-header">
           <h5 className="modal-title">{title}</h5>
           <button className="modal-close" onClick={onClose}>&times;</button>
@@ -2524,14 +3102,14 @@ const Search = ({ onSearch }) => {
 
 // Navbar component
 const Navbar = () => {
-  const { isAuthenticated, currentUser, logout } = useAuth();
-  const { canCreateArticle } = useAppContext();
+  const { isAuthenticated, currentUser, logout, hasPermission } = useAuth();
+  const { canCreateArticle, settings, PERMISSIONS } = useAppContext();
   const navigate = useNavigate();
   
   return (
     <nav className="navbar">
       <div className="container">
-        <Link to="/" className="navbar-brand">CodeBlog</Link>
+        <Link to="/" className="navbar-brand">{settings.siteName}</Link>
         
         <div className="navbar-menu">
           <Link to="/" className="navbar-item">Home</Link>
@@ -2547,14 +3125,18 @@ const Navbar = () => {
             <Dropdown 
               trigger={
                 <div className="d-flex align-items-center">
-                  <img 
-                    src={getRandomAvatar(currentUser.id)} 
-                    alt={currentUser.name} 
-                    className="rounded-circle mr-2"
-                    width="32"
-                    height="32"
+                  <Avatar 
+                    userId={currentUser.id} 
+                    name={currentUser.name} 
+                    size="sm"
+                    className="mr-2"
                   />
                   <span>{currentUser.name}</span>
+                  {currentUser.role && (
+                    <span className={`role-badge role-${currentUser.role}`}>
+                      {getRoleDisplayName(currentUser.role)}
+                    </span>
+                  )}
                 </div>
               }
             >
@@ -2562,9 +3144,13 @@ const Navbar = () => {
                 Profile
               </DropdownItem>
               
-              {currentUser.role === 'admin' && (
+              <DropdownItem onClick={() => navigate('/my-articles')}>
+                My Articles
+              </DropdownItem>
+              
+              {hasPermission(PERMISSIONS.MANAGE_USERS) && (
                 <DropdownItem onClick={() => navigate('/admin')}>
-                  Admin
+                  Admin Dashboard
                 </DropdownItem>
               )}
               
@@ -2588,6 +3174,7 @@ const Navbar = () => {
 
 // Footer component
 const Footer = () => {
+  const { settings } = useAppContext();
   const currentYear = new Date().getFullYear();
   
   return (
@@ -2595,8 +3182,8 @@ const Footer = () => {
       <div className="container">
         <div className="row">
           <div className="col">
-            <h5>CodeBlog</h5>
-            <p>A platform for developers to share knowledge and insights.</p>
+            <h5>{settings.siteName}</h5>
+            <p>{settings.siteDescription}</p>
           </div>
           
           <div className="col">
@@ -2619,7 +3206,7 @@ const Footer = () => {
         </div>
         
         <div className="text-center mt-4">
-          <p>&copy; {currentYear} CodeBlog. All rights reserved.</p>
+          <p>&copy; {currentYear} {settings.siteName}. All rights reserved.</p>
         </div>
       </div>
     </footer>
@@ -2628,11 +3215,19 @@ const Footer = () => {
 
 // Home page component
 const HomePage = () => {
-  const { articles, tags } = useAppContext();
+  const { articles, tags, settings } = useAppContext();
   const [filteredArticles, setFilteredArticles] = useState([]);
   const [selectedTag, setSelectedTag] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const articlesPerPage = 6;
+  const location = useLocation();
+  const tagParam = useQueryParam('tag');
+  
+  // Set selected tag from URL param
+  useEffect(() => {
+    if (tagParam) {
+      setSelectedTag(tagParam);
+    }
+  }, [tagParam]);
   
   // Sort articles by date (newest first)
   const sortedArticles = useMemo(() => {
@@ -2675,6 +3270,7 @@ const HomePage = () => {
   };
   
   // Pagination logic
+  const articlesPerPage = settings.articlesPerPage || 6;
   const indexOfLastArticle = currentPage * articlesPerPage;
   const indexOfFirstArticle = indexOfLastArticle - articlesPerPage;
   const currentArticles = filteredArticles.slice(indexOfFirstArticle, indexOfLastArticle);
@@ -2758,12 +3354,11 @@ const ArticleCard = ({ article }) => {
         </h3>
         
         <div className="d-flex align-items-center mb-3">
-          <img 
-            src={getRandomAvatar(article.userId)} 
-            alt={author} 
-            className="rounded-circle mr-2"
-            width="24"
-            height="24"
+          <Avatar 
+            userId={article.userId} 
+            name={author} 
+            size="sm"
+            className="mr-2"
           />
           <span className="mr-2">{author}</span>
           <span className="text-muted">{formatDate(createdAt)}</span>
@@ -2773,7 +3368,17 @@ const ArticleCard = ({ article }) => {
         
         <div className="article-tags mb-3">
           {tags.map(tag => (
-            <Badge key={tag} className="mr-1">{tag}</Badge>
+            <Link 
+              key={tag} 
+              to={`/?tag=${tag}`} 
+              className="article-tag mr-1"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(`/?tag=${tag}`);
+              }}
+            >
+              {tag}
+            </Link>
           ))}
         </div>
       </div>
@@ -2801,10 +3406,14 @@ const ArticleDetailPage = () => {
     toggleArticleLike, 
     getArticleComments, 
     addComment, 
+    updateComment,
     deleteComment,
+    deleteArticle,
     canEditArticle,
     canDeleteArticle,
-    canDeleteComment 
+    canEditComment,
+    canDeleteComment,
+    settings
   } = useAppContext();
   const { isAuthenticated, currentUser } = useAuth();
   const navigate = useNavigate();
@@ -2812,6 +3421,7 @@ const ArticleDetailPage = () => {
   const article = getArticleById(id);
   const [comments, setComments] = useState([]);
   const [commentContent, setCommentContent] = useState('');
+  const [editingComment, setEditingComment] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   
   // Fetch comments
@@ -2863,9 +3473,21 @@ const ArticleDetailPage = () => {
     
     if (!commentContent.trim()) return;
     
-    addComment(article.id, commentContent);
+    if (editingComment) {
+      updateComment(editingComment.id, commentContent);
+      setEditingComment(null);
+    } else {
+      addComment(article.id, commentContent);
+    }
+    
     setCommentContent('');
     setComments(getArticleComments(article.id));
+  };
+  
+  // Handle comment edit
+  const handleEditComment = (comment) => {
+    setEditingComment(comment);
+    setCommentContent(comment.content);
   };
   
   // Handle comment deletion
@@ -2876,13 +3498,8 @@ const ArticleDetailPage = () => {
   
   // Handle article deletion
   const handleDeleteArticle = () => {
+    deleteArticle(article.id);
     navigate('/');
-    setTimeout(() => {
-      // Delay actual deletion to allow navigation
-      window.scrollTo(0, 0);
-      setDeleteModalOpen(false);
-      navigate('/');
-    }, 100);
   };
   
   return (
@@ -2892,9 +3509,10 @@ const ArticleDetailPage = () => {
         
         <div className="article-meta">
           <div className="article-author">
-            <img 
-              src={getRandomAvatar(article.userId)} 
-              alt={article.author} 
+            <Avatar 
+              userId={article.userId} 
+              name={article.author} 
+              size="md" 
               className="author-avatar"
             />
             <span>{article.author}</span>
@@ -2909,7 +3527,15 @@ const ArticleDetailPage = () => {
         
         <div className="article-tags">
           {article.tags.map(tag => (
-            <Link to={`/?tag=${tag}`} key={tag} className="article-tag">
+            <Link 
+              key={tag} 
+              to={`/?tag=${tag}`} 
+              className="article-tag"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(`/?tag=${tag}`);
+              }}
+            >
               {tag}
             </Link>
           ))}
@@ -2968,61 +3594,95 @@ const ArticleDetailPage = () => {
           )}
         </div>
         
-        <div className="comments">
-          <h3 className="comments-title">Comments ({comments.length})</h3>
-          
-          {isAuthenticated ? (
-            <form onSubmit={handleCommentSubmit} className="comment-form mb-4">
-              <Textarea
-                placeholder="Write a comment..."
-                value={commentContent}
-                onChange={(e) => setCommentContent(e.target.value)}
-                rows={3}
-              />
-              <Button type="submit" className="mt-2">Post Comment</Button>
-            </form>
-          ) : (
-            <div className="alert alert-info">
-              <Link to="/login">Login</Link> or <Link to="/register">register</Link> to leave a comment.
-            </div>
-          )}
-          
-          {comments.length === 0 ? (
-            <div className="text-center my-5">
-              <p>No comments yet. Be the first to share your thoughts!</p>
-            </div>
-          ) : (
-            <div>
-              {comments.map(comment => (
-                <div key={comment.id} className="comment">
-                  <img 
-                    src={getRandomAvatar(comment.userId)} 
-                    alt={comment.author} 
-                    className="comment-avatar"
-                  />
-                  <div className="comment-content">
-                    <div className="comment-header">
-                      <div className="comment-author">{comment.author}</div>
-                      <div className="comment-date">{formatDate(comment.createdAt)}</div>
-                    </div>
-                    <div className="comment-body">{comment.content}</div>
-                    
-                    {canDeleteComment(comment.userId) && (
-                      <Button 
-                        variant="danger" 
-                        size="sm" 
-                        className="mt-2"
-                        onClick={() => handleDeleteComment(comment.id)}
-                      >
-                        Delete
-                      </Button>
-                    )}
-                  </div>
+        {settings.enableComments && (
+          <div className="comments">
+            <h3 className="comments-title">Comments ({comments.length})</h3>
+            
+            {isAuthenticated ? (
+              <form onSubmit={handleCommentSubmit} className="comment-form mb-4">
+                <Textarea
+                  placeholder={editingComment ? "Edit your comment..." : "Write a comment..."}
+                  value={commentContent}
+                  onChange={(e) => setCommentContent(e.target.value)}
+                  rows={3}
+                />
+                <div className="d-flex justify-content-between mt-2">
+                  {editingComment && (
+                    <Button 
+                      type="button" 
+                      variant="secondary" 
+                      onClick={() => {
+                        setEditingComment(null);
+                        setCommentContent('');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                  <Button type="submit">
+                    {editingComment ? 'Update Comment' : 'Post Comment'}
+                  </Button>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </form>
+            ) : (
+              <div className="alert alert-info">
+                <Link to="/login">Login</Link> or <Link to="/register">register</Link> to leave a comment.
+              </div>
+            )}
+            
+            {comments.length === 0 ? (
+              <div className="text-center my-5">
+                <p>No comments yet. Be the first to share your thoughts!</p>
+              </div>
+            ) : (
+              <div>
+                {comments.map(comment => (
+                  <div key={comment.id} className="comment">
+                    <Avatar 
+                      userId={comment.userId} 
+                      name={comment.author} 
+                      size="md" 
+                      className="comment-avatar"
+                    />
+                    <div className="comment-content">
+                      <div className="comment-header">
+                        <div className="comment-author">{comment.author}</div>
+                        <div className="comment-date">{formatDate(comment.createdAt)}</div>
+                        {comment.updatedAt && comment.updatedAt !== comment.createdAt && (
+                          <div className="comment-date ml-2">(edited)</div>
+                        )}
+                      </div>
+                      <div className="comment-body">{comment.content}</div>
+                      
+                      <div className="mt-2">
+                        {canEditComment(comment.userId) && (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="mr-2"
+                            onClick={() => handleEditComment(comment)}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        
+                        {canDeleteComment(comment.userId) && (
+                          <Button 
+                            variant="danger" 
+                            size="sm" 
+                            onClick={() => handleDeleteComment(comment.id)}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </article>
       
       {/* Delete confirmation modal */}
@@ -3051,7 +3711,7 @@ const ArticleDetailPage = () => {
 const LoginPage = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const location = window.location;
+  const location = useLocation();
   
   // Get redirect path from query params
   const searchParams = new URLSearchParams(location.search);
@@ -3153,8 +3813,19 @@ const LoginPage = () => {
 
 // Register page component
 const RegisterPage = () => {
-  const { register } = useAuth();
+  const { register, settings } = useAppContext();
   const navigate = useNavigate();
+  
+  // Check if registration is allowed
+  if (!settings.allowRegistration) {
+    return (
+      <div className="container text-center my-5">
+        <h2>Registration is Disabled</h2>
+        <p>We're currently not accepting new registrations. Please contact the administrator for more information.</p>
+        <Button onClick={() => navigate('/')}>Back to Home</Button>
+      </div>
+    );
+  }
   
   // Form state and validation
   const {
@@ -3357,16 +4028,24 @@ const ProfilePage = () => {
         <div className="col-md-4">
           <Card className="mt-4">
             <div className="text-center">
-              <img 
-                src={getRandomAvatar(currentUser.id)} 
-                alt={currentUser.name} 
-                className="rounded-circle mb-3"
-                width="150"
-                height="150"
+              <Avatar 
+                userId={currentUser.id} 
+                name={currentUser.name} 
+                size="xl" 
+                className="mb-3"
               />
               <h3>{currentUser.name}</h3>
               <p className="text-muted">{currentUser.email}</p>
-              <Badge variant="primary">{currentUser.role}</Badge>
+              <div className={`role-badge role-${currentUser.role}`}>
+                {getRoleDisplayName(currentUser.role)}
+              </div>
+              
+              {currentUser.bio && (
+                <div className="mt-3">
+                  <h5>Bio</h5>
+                  <p>{currentUser.bio}</p>
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -3454,9 +4133,143 @@ const ProfilePage = () => {
   );
 };
 
+// My Articles page component
+const MyArticlesPage = () => {
+  const { articles, deleteArticle } = useAppContext();
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [articleToDelete, setArticleToDelete] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const articlesPerPage = 10;
+  
+  // Filter user's articles
+  const userArticles = useMemo(() => {
+    if (!currentUser) return [];
+    
+    return articles
+      .filter(article => article.userId === currentUser.id)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }, [articles, currentUser]);
+  
+  // Pagination logic
+  const indexOfLastArticle = currentPage * articlesPerPage;
+  const indexOfFirstArticle = indexOfLastArticle - articlesPerPage;
+  const currentArticles = userArticles.slice(indexOfFirstArticle, indexOfLastArticle);
+  const totalPages = Math.ceil(userArticles.length / articlesPerPage);
+  
+  // Handle article deletion
+  const handleDeleteArticle = () => {
+    if (articleToDelete) {
+      deleteArticle(articleToDelete.id);
+      setDeleteModalOpen(false);
+      setArticleToDelete(null);
+    }
+  };
+  
+  return (
+    <div className="container">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h1>My Articles</h1>
+        <Button onClick={() => navigate('/articles/new')}>New Article</Button>
+      </div>
+      
+      {userArticles.length === 0 ? (
+        <div className="text-center my-5">
+          <h3>No articles found</h3>
+          <p>You haven't published any articles yet.</p>
+          <Button onClick={() => navigate('/articles/new')}>Create Your First Article</Button>
+        </div>
+      ) : (
+        <>
+          <Card>
+            <Table
+              headers={['Title', 'Created', 'Views', 'Likes', 'Actions']}
+              data={currentArticles}
+              renderRow={(article) => (
+                <tr key={article.id}>
+                  <td>
+                    <Link to={`/articles/${article.id}`}>{article.title}</Link>
+                  </td>
+                  <td>{formatDate(article.createdAt)}</td>
+                  <td>{article.views}</td>
+                  <td>{article.likes}</td>
+                  <td>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="mr-2"
+                      onClick={() => navigate(`/articles/${article.id}/edit`)}
+                    >
+                      Edit
+                    </Button>
+                    <Button 
+                      variant="danger" 
+                      size="sm"
+                      onClick={() => {
+                        setArticleToDelete(article);
+                        setDeleteModalOpen(true);
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              )}
+            />
+          </Card>
+          
+          {totalPages > 1 && (
+            <div className="d-flex justify-content-center mt-4">
+              <Pagination 
+                currentPage={currentPage} 
+                totalPages={totalPages} 
+                onPageChange={setCurrentPage} 
+              />
+            </div>
+          )}
+        </>
+      )}
+      
+      {/* Delete confirmation modal */}
+      <Modal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setArticleToDelete(null);
+        }}
+        title="Delete Article"
+        footer={
+          <>
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setDeleteModalOpen(false);
+                setArticleToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDeleteArticle}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>Are you sure you want to delete "{articleToDelete?.title}"? This action cannot be undone.</p>
+      </Modal>
+    </div>
+  );
+};
+
 // Tag page component
 const TagsPage = () => {
-  const { tags, articles } = useAppContext();
+  const { tags, articles, PERMISSIONS, canManageTags, deleteTag, updateTag } = useAppContext();
+  const { hasPermission } = useAuth();
+  const [selectedTag, setSelectedTag] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
   
   // Sort tags by count (popularity)
   const sortedTags = useMemo(() => {
@@ -3484,6 +4297,35 @@ const TagsPage = () => {
   const getArticleCountForTag = useCallback((tagName) => {
     return articles.filter(article => article.tags.includes(tagName)).length;
   }, [articles]);
+  
+  // Handle tag edit
+  const handleEditTag = (tag) => {
+    setSelectedTag(tag);
+    setNewTagName(tag.name);
+    setIsEditModalOpen(true);
+  };
+  
+  // Handle tag delete
+  const handleDeleteTagClick = (tag) => {
+    setSelectedTag(tag);
+    setIsDeleteModalOpen(true);
+  };
+  
+  // Update tag
+  const handleUpdateTag = () => {
+    if (selectedTag && newTagName) {
+      updateTag(selectedTag.id, newTagName);
+      setIsEditModalOpen(false);
+    }
+  };
+  
+  // Delete tag
+  const handleDeleteTag = () => {
+    if (selectedTag) {
+      deleteTag(selectedTag.id);
+      setIsDeleteModalOpen(false);
+    }
+  };
   
   return (
     <div className="container">
@@ -3513,19 +4355,86 @@ const TagsPage = () => {
               
               <div className="d-flex flex-wrap">
                 {tags.map(tag => (
-                  <Link 
-                    key={tag.id} 
-                    to={`/?tag=${tag.name}`} 
-                    className="badge badge-primary mr-2 mb-2 p-2"
-                  >
-                    {tag.name} ({getArticleCountForTag(tag.name)})
-                  </Link>
+                  <div key={tag.id} className="mr-2 mb-2 d-flex align-items-center">
+                    <Link 
+                      to={`/?tag=${tag.name}`} 
+                      className="badge badge-primary p-2"
+                    >
+                      {tag.name} ({getArticleCountForTag(tag.name)})
+                    </Link>
+                    
+                    {canManageTags() && (
+                      <div className="ml-1">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="mr-1 p-1"
+                          onClick={() => handleEditTag(tag)}
+                        >
+                          ✏️
+                        </Button>
+                        
+                        <Button 
+                          variant="danger" 
+                          size="sm" 
+                          className="p-1"
+                          onClick={() => handleDeleteTagClick(tag)}
+                        >
+                          🗑️
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
           ))}
         </div>
       </div>
+      
+      {/* Edit Tag Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        title="Edit Tag"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setIsEditModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleUpdateTag}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <Input 
+          label="Tag Name"
+          value={newTagName}
+          onChange={(e) => setNewTagName(e.target.value)}
+          required
+        />
+      </Modal>
+      
+      {/* Delete Tag Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        title="Delete Tag"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setIsDeleteModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDeleteTag}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>Are you sure you want to delete the tag "{selectedTag?.name}"? This will remove it from all articles.</p>
+        <p>This action cannot be undone.</p>
+      </Modal>
     </div>
   );
 };
@@ -3789,150 +4698,1078 @@ const EditArticlePage = () => {
   );
 };
 
-// Admin page component
-const AdminPage = () => {
-  const { users, articles, updateUserRole } = useAppContext();
-  const [activeTab, setActiveTab] = useState('users');
+// Admin Dashboard component
+const AdminDashboard = () => {
+  const { getStats, PERMISSIONS } = useAppContext();
+  const { hasPermission } = useAuth();
+  const [activeTab, setActiveTab] = useState('overview');
+  
+  // Get stats
+  const stats = getStats();
+  
+  return (
+    <div className="container">
+      <h1 className="mb-4">Admin Dashboard</h1>
+      
+      <div className="admin-stats">
+        <div className="stat-card">
+          <div className="stat-value">{stats.totalArticles}</div>
+          <div className="stat-label">Articles</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.totalUsers}</div>
+          <div className="stat-label">Users</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.totalComments}</div>
+          <div className="stat-label">Comments</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.articleViews}</div>
+          <div className="stat-label">Total Views</div>
+        </div>
+      </div>
+      
+      <div className="admin-tabs">
+        <div 
+          className={`admin-tab ${activeTab === 'overview' ? 'active' : ''}`}
+          onClick={() => setActiveTab('overview')}
+        >
+          Overview
+        </div>
+        
+        {hasPermission(PERMISSIONS.MANAGE_USERS) && (
+          <div 
+            className={`admin-tab ${activeTab === 'users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('users')}
+          >
+            Users
+          </div>
+        )}
+        
+        <div 
+          className={`admin-tab ${activeTab === 'articles' ? 'active' : ''}`}
+          onClick={() => setActiveTab('articles')}
+        >
+          Articles
+        </div>
+        
+        {hasPermission(PERMISSIONS.MANAGE_ROLES) && (
+          <div 
+            className={`admin-tab ${activeTab === 'roles' ? 'active' : ''}`}
+            onClick={() => setActiveTab('roles')}
+          >
+            Roles & Permissions
+          </div>
+        )}
+        
+        {hasPermission(PERMISSIONS.MANAGE_SETTINGS) && (
+          <div 
+            className={`admin-tab ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            Settings
+          </div>
+        )}
+      </div>
+      
+      <div className="mt-4">
+        {activeTab === 'overview' && <AdminOverview stats={stats} />}
+        {activeTab === 'users' && hasPermission(PERMISSIONS.MANAGE_USERS) && <AdminUsers />}
+        {activeTab === 'articles' && <AdminArticles />}
+        {activeTab === 'roles' && hasPermission(PERMISSIONS.MANAGE_ROLES) && <AdminRoles />}
+        {activeTab === 'settings' && hasPermission(PERMISSIONS.MANAGE_SETTINGS) && <AdminSettings />}
+      </div>
+    </div>
+  );
+};
+
+// Admin Overview component
+const AdminOverview = ({ stats }) => {
+  return (
+    <div>
+      <div className="row mb-4">
+        <div className="col-md-6">
+          <Card title="Top Articles">
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Views</th>
+                    <th>Likes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.topArticles.map(article => (
+                    <tr key={article.id}>
+                      <td><Link to={`/articles/${article.id}`}>{article.title}</Link></td>
+                      <td>{article.views}</td>
+                      <td>{article.likes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+        
+        <div className="col-md-6">
+          <Card title="Top Authors">
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Author</th>
+                    <th>Articles</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.topAuthors.map(author => (
+                    <tr key={author.id}>
+                      <td>{author.name}</td>
+                      <td>{author.articlesCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      </div>
+      
+      <Card title="Popular Tags">
+        <div className="d-flex flex-wrap">
+          {stats.popularTags.map(tag => (
+            <Link key={tag.id} to={`/?tag=${tag.name}`} className="badge badge-primary mr-2 mb-2 p-2">
+              {tag.name} ({tag.count})
+            </Link>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// Admin Users component
+const AdminUsers = () => {
+  const { users, updateUserRole, addUser, updateUser, deleteUser, rolePermissions, ROLES } = useAppContext();
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const usersPerPage = 10;
+  
+  // Form state
+  const {
+    values,
+    errors,
+    touched,
+    handleChange,
+    handleBlur,
+    handleSubmit,
+    isSubmitting,
+    resetForm
+  } = useForm(
+    { 
+      name: '', 
+      email: '',
+      password: '',
+      role: ROLES.READER
+    },
+    (values) => {
+      const errors = {};
+      
+      if (!values.name) {
+        errors.name = 'Name is required';
+      }
+      
+      if (!values.email) {
+        errors.email = 'Email is required';
+      } else if (!/\S+@\S+\.\S+/.test(values.email)) {
+        errors.email = 'Email is invalid';
+      }
+      
+      if (!isEditing && !values.password) {
+        errors.password = 'Password is required';
+      } else if (values.password && values.password.length < 6) {
+        errors.password = 'Password must be at least 6 characters';
+      }
+      
+      return errors;
+    }
+  );
+  
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!userModalOpen) {
+      resetForm();
+      setIsEditing(false);
+      setSelectedUser(null);
+    }
+  }, [userModalOpen, resetForm]);
   
   // Sort users by join date (newest first)
   const sortedUsers = useMemo(() => {
     return [...users].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [users]);
   
-  // Sort articles by date (newest first)
-  const sortedArticles = useMemo(() => {
-    return [...articles].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [articles]);
+  // Filter users by search term
+  const filteredUsers = useMemo(() => {
+    if (!searchTerm) return sortedUsers;
+    
+    const lowercaseSearchTerm = searchTerm.toLowerCase();
+    return sortedUsers.filter(
+      user => 
+        user.name.toLowerCase().includes(lowercaseSearchTerm) ||
+        user.email.toLowerCase().includes(lowercaseSearchTerm) ||
+        user.role.toLowerCase().includes(lowercaseSearchTerm)
+    );
+  }, [sortedUsers, searchTerm]);
+  
+  // Pagination logic
+  const indexOfLastUser = currentPage * usersPerPage;
+  const indexOfFirstUser = indexOfLastUser - usersPerPage;
+  const currentUsers = filteredUsers.slice(indexOfFirstUser, indexOfLastUser);
+  const totalPages = Math.ceil(filteredUsers.length / usersPerPage);
   
   // Handle role change
   const handleRoleChange = (userId, role) => {
     updateUserRole(userId, role);
   };
   
-  return (
-    <div className="container">
-      <h1 className="mb-4">Admin Dashboard</h1>
+  // Handle edit user
+  const handleEditUser = (user) => {
+    setSelectedUser(user);
+    setIsEditing(true);
+    resetForm({
+      name: user.name,
+      email: user.email,
+      password: '',
+      role: user.role
+    });
+    setUserModalOpen(true);
+  };
+  
+  // Handle delete user click
+  const handleDeleteUserClick = (user) => {
+    setSelectedUser(user);
+    setDeleteModalOpen(true);
+  };
+  
+  // Handle form submission
+  const handleFormSubmit = (values, done) => {
+    if (isEditing && selectedUser) {
+      // Update user
+      const userData = { ...values };
+      if (!userData.password) delete userData.password;
       
-      <div className="d-flex mb-4">
-        <button 
-          className={`btn mr-2 ${activeTab === 'users' ? 'btn-primary' : 'btn-outline'}`} 
-          onClick={() => setActiveTab('users')}
-        >
-          Users
-        </button>
-        <button 
-          className={`btn ${activeTab === 'articles' ? 'btn-primary' : 'btn-outline'}`} 
-          onClick={() => setActiveTab('articles')}
-        >
-          Articles
-        </button>
+      updateUser(selectedUser.id, userData);
+    } else {
+      // Add new user
+      addUser(values);
+    }
+    
+    done();
+    setUserModalOpen(false);
+  };
+  
+  // Handle delete user
+  const handleDeleteUser = () => {
+    if (selectedUser) {
+      deleteUser(selectedUser.id);
+      setDeleteModalOpen(false);
+    }
+  };
+  
+  // Available roles for dropdown
+  const roleOptions = Object.keys(rolePermissions).map(role => ({
+    value: role,
+    label: getRoleDisplayName(role)
+  }));
+  
+  return (
+    <div>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2>Users</h2>
+        <Button onClick={() => setUserModalOpen(true)}>Add New User</Button>
       </div>
       
-      {activeTab === 'users' && (
-        <Card title={`Users (${users.length})`}>
-          <div className="table-responsive">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Joined</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedUsers.map(user => (
-                  <tr key={user.id}>
-                    <td>
-                      <div className="d-flex align-items-center">
-                        <img 
-                          src={getRandomAvatar(user.id)} 
-                          alt={user.name} 
-                          className="rounded-circle mr-2"
-                          width="32"
-                          height="32"
-                        />
-                        {user.name}
-                      </div>
-                    </td>
-                    <td>{user.email}</td>
-                    <td>
-                      <Badge variant={
-                        user.role === 'admin' ? 'danger' : 
-                        user.role === 'writer' ? 'primary' : 
-                        'secondary'
-                      }>
-                        {user.role}
-                      </Badge>
-                    </td>
-                    <td>{formatDate(user.createdAt)}</td>
-                    <td>
-                      <Select
-                        value={user.role}
-                        onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                        options={[
-                          { value: 'admin', label: 'Admin' },
-                          { value: 'writer', label: 'Writer' },
-                          { value: 'reader', label: 'Reader' }
-                        ]}
+      <div className="mb-4">
+        <Input
+          placeholder="Search users..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+      
+      <Card>
+        <div className="table-responsive">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Joined</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentUsers.map(user => (
+                <tr key={user.id}>
+                  <td>
+                    <div className="d-flex align-items-center">
+                      <Avatar 
+                        userId={user.id} 
+                        name={user.name} 
+                        size="sm"
+                        className="mr-2"
                       />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                      {user.name}
+                    </div>
+                  </td>
+                  <td>{user.email}</td>
+                  <td>
+                    <Select
+                      value={user.role}
+                      onChange={(e) => handleRoleChange(user.id, e.target.value)}
+                      options={roleOptions}
+                    />
+                  </td>
+                  <td>{formatDate(user.createdAt)}</td>
+                  <td>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="mr-2"
+                      onClick={() => handleEditUser(user)}
+                    >
+                      Edit
+                    </Button>
+                    <Button 
+                      variant="danger" 
+                      size="sm"
+                      onClick={() => handleDeleteUserClick(user)}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      
+      {totalPages > 1 && (
+        <div className="d-flex justify-content-center mt-4">
+          <Pagination 
+            currentPage={currentPage} 
+            totalPages={totalPages} 
+            onPageChange={setCurrentPage} 
+          />
+        </div>
       )}
       
-      {activeTab === 'articles' && (
-        <Card title={`Articles (${articles.length})`}>
-          <div className="table-responsive">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Author</th>
-                  <th>Created</th>
-                  <th>Views</th>
-                  <th>Likes</th>
-                  <th>Actions</th>
+      {/* User Modal */}
+      <Modal
+        isOpen={userModalOpen}
+        onClose={() => setUserModalOpen(false)}
+        title={isEditing ? 'Edit User' : 'Add New User'}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setUserModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              type="submit" 
+              form="userForm"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? <Spinner size="sm" /> : isEditing ? 'Update User' : 'Add User'}
+            </Button>
+          </>
+        }
+      >
+        <form id="userForm" onSubmit={handleSubmit(handleFormSubmit)}>
+          <Input 
+            label="Name"
+            name="name"
+            placeholder="Enter name"
+            value={values.name}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            error={errors.name}
+            touched={touched.name}
+            required
+          />
+          
+          <Input 
+            label="Email"
+            name="email"
+            type="email"
+            placeholder="Enter email"
+            value={values.email}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            error={errors.email}
+            touched={touched.email}
+            required
+          />
+          
+          <Input 
+            label={isEditing ? 'Password (leave blank to keep current)' : 'Password'}
+            name="password"
+            type="password"
+            placeholder={isEditing ? 'Enter new password' : 'Enter password'}
+            value={values.password}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            error={errors.password}
+            touched={touched.password}
+            required={!isEditing}
+          />
+          
+          <Select 
+            label="Role"
+            name="role"
+            value={values.role}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            options={roleOptions}
+          />
+        </form>
+      </Modal>
+      
+      {/* Delete User Modal */}
+      <Modal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        title="Delete User"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDeleteUser}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>Are you sure you want to delete the user "{selectedUser?.name}"?</p>
+        <p>This will also delete all articles and comments created by this user. This action cannot be undone.</p>
+      </Modal>
+    </div>
+  );
+};
+
+// Admin Articles component
+const AdminArticles = () => {
+  const { articles, deleteArticle } = useAppContext();
+  const navigate = useNavigate();
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [selectedArticle, setSelectedArticle] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterTag, setFilterTag] = useState('');
+  const [filterAuthor, setFilterAuthor] = useState('');
+  const articlesPerPage = 10;
+  
+  // Sort articles by date (newest first)
+  const sortedArticles = useMemo(() => {
+    return [...articles].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }, [articles]);
+  
+  // Get unique tags and authors for filters
+  const uniqueTags = useMemo(() => {
+    const allTags = [];
+    articles.forEach(article => {
+      article.tags.forEach(tag => {
+        if (!allTags.includes(tag)) {
+          allTags.push(tag);
+        }
+      });
+    });
+    return allTags.sort();
+  }, [articles]);
+  
+  const uniqueAuthors = useMemo(() => {
+    const authors = new Set();
+    articles.forEach(article => {
+      authors.add(article.author);
+    });
+    return Array.from(authors).sort();
+  }, [articles]);
+  
+  // Filter articles
+  const filteredArticles = useMemo(() => {
+    return sortedArticles.filter(article => {
+      // Filter by search term
+      if (searchTerm && !article.title.toLowerCase().includes(searchTerm.toLowerCase())) {
+        return false;
+      }
+      
+      // Filter by tag
+      if (filterTag && !article.tags.includes(filterTag)) {
+        return false;
+      }
+      
+      // Filter by author
+      if (filterAuthor && article.author !== filterAuthor) {
+        return false;
+      }
+      
+      return true;
+    });
+  }, [sortedArticles, searchTerm, filterTag, filterAuthor]);
+  
+  // Pagination logic
+  const indexOfLastArticle = currentPage * articlesPerPage;
+  const indexOfFirstArticle = indexOfLastArticle - articlesPerPage;
+  const currentArticles = filteredArticles.slice(indexOfFirstArticle, indexOfLastArticle);
+  const totalPages = Math.ceil(filteredArticles.length / articlesPerPage);
+  
+  // Handle delete article click
+  const handleDeleteArticleClick = (article) => {
+    setSelectedArticle(article);
+    setDeleteModalOpen(true);
+  };
+  
+  // Handle delete article
+  const handleDeleteArticle = () => {
+    if (selectedArticle) {
+      deleteArticle(selectedArticle.id);
+      setDeleteModalOpen(false);
+    }
+  };
+  
+  // Reset filters
+  const resetFilters = () => {
+    setSearchTerm('');
+    setFilterTag('');
+    setFilterAuthor('');
+    setCurrentPage(1);
+  };
+  
+  return (
+    <div>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2>Articles</h2>
+        <div>
+          <Button 
+            variant="secondary" 
+            className="mr-2"
+            onClick={resetFilters}
+          >
+            Reset Filters
+          </Button>
+          <Button onClick={() => navigate('/articles/new')}>Add New Article</Button>
+        </div>
+      </div>
+      
+      <div className="row mb-4">
+        <div className="col-md-4">
+          <Input
+            placeholder="Search articles..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="col-md-4">
+          <Select
+            value={filterTag}
+            onChange={(e) => setFilterTag(e.target.value)}
+            options={[
+              { value: '', label: 'All Tags' },
+              ...uniqueTags.map(tag => ({ value: tag, label: tag }))
+            ]}
+          />
+        </div>
+        <div className="col-md-4">
+          <Select
+            value={filterAuthor}
+            onChange={(e) => setFilterAuthor(e.target.value)}
+            options={[
+              { value: '', label: 'All Authors' },
+              ...uniqueAuthors.map(author => ({ value: author, label: author }))
+            ]}
+          />
+        </div>
+      </div>
+      
+      <Card>
+        <div className="table-responsive">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Created</th>
+                <th>Tags</th>
+                <th>Views</th>
+                <th>Likes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentArticles.map(article => (
+                <tr key={article.id}>
+                  <td>
+                    <Link to={`/articles/${article.id}`}>{article.title}</Link>
+                  </td>
+                  <td>{article.author}</td>
+                  <td>{formatDate(article.createdAt)}</td>
+                  <td>
+                    <div className="d-flex flex-wrap">
+                      {article.tags.map(tag => (
+                        <span key={tag} className="badge badge-primary mr-1 mb-1">{tag}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td>{article.views}</td>
+                  <td>{article.likes}</td>
+                  <td>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="mr-2"
+                      onClick={() => navigate(`/articles/${article.id}/edit`)}
+                    >
+                      Edit
+                    </Button>
+                    <Button 
+                      variant="danger" 
+                      size="sm"
+                      onClick={() => handleDeleteArticleClick(article)}
+                    >
+                      Delete
+                    </Button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {sortedArticles.map(article => (
-                  <tr key={article.id}>
-                    <td>
-                      <Link to={`/articles/${article.id}`}>{article.title}</Link>
-                    </td>
-                    <td>{article.author}</td>
-                    <td>{formatDate(article.createdAt)}</td>
-                    <td>{article.views}</td>
-                    <td>{article.likes}</td>
-                    <td>
-                      <Link to={`/articles/${article.id}/edit`} className="btn btn-sm btn-outline mr-1">
-                        Edit
-                      </Link>
-                      <Button 
-                        variant="danger" 
-                        size="sm"
-                        onClick={() => {
-                          if (window.confirm('Are you sure you want to delete this article?')) {
-                            // Delete article
-                          }
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+              ))}
+              
+              {currentArticles.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="text-center py-3">
+                    No articles found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      
+      {totalPages > 1 && (
+        <div className="d-flex justify-content-center mt-4">
+          <Pagination 
+            currentPage={currentPage} 
+            totalPages={totalPages} 
+            onPageChange={setCurrentPage} 
+          />
+        </div>
       )}
+      
+      {/* Delete Article Modal */}
+      <Modal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        title="Delete Article"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDeleteArticle}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>Are you sure you want to delete the article "{selectedArticle?.title}"?</p>
+        <p>This will also delete all comments on this article. This action cannot be undone.</p>
+      </Modal>
+    </div>
+  );
+};
+
+// Admin Roles component
+const AdminRoles = () => {
+  const { rolePermissions, PERMISSIONS, createRole, updateRolePermissions, deleteRole } = useAppContext();
+  const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState('');
+  const [roleName, setRoleName] = useState('');
+  const [selectedPermissions, setSelectedPermissions] = useState([]);
+  const [isEditing, setIsEditing] = useState(false);
+  
+  // All available permissions
+  const allPermissions = Object.values(PERMISSIONS);
+  
+  // Group permissions by category
+  const permissionCategories = {
+    'Articles': [
+      PERMISSIONS.CREATE_ARTICLE,
+      PERMISSIONS.EDIT_ANY_ARTICLE,
+      PERMISSIONS.EDIT_OWN_ARTICLE,
+      PERMISSIONS.DELETE_ANY_ARTICLE,
+      PERMISSIONS.DELETE_OWN_ARTICLE
+    ],
+    'Comments': [
+      PERMISSIONS.CREATE_COMMENT,
+      PERMISSIONS.EDIT_ANY_COMMENT,
+      PERMISSIONS.EDIT_OWN_COMMENT,
+      PERMISSIONS.DELETE_ANY_COMMENT,
+      PERMISSIONS.DELETE_OWN_COMMENT
+    ],
+    'Administration': [
+      PERMISSIONS.MANAGE_USERS,
+      PERMISSIONS.MANAGE_ROLES,
+      PERMISSIONS.MANAGE_TAGS,
+      PERMISSIONS.MANAGE_SETTINGS
+    ]
+  };
+  
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!roleModalOpen) {
+      setRoleName('');
+      setSelectedPermissions([]);
+      setIsEditing(false);
+      setSelectedRole('');
+    }
+  }, [roleModalOpen]);
+  
+  // Handle permission toggle
+  const handlePermissionToggle = (permission) => {
+    setSelectedPermissions(prev => {
+      if (prev.includes(permission)) {
+        return prev.filter(p => p !== permission);
+      } else {
+        return [...prev, permission];
+      }
+    });
+  };
+  
+  // Handle form submission
+  const handleFormSubmit = (e) => {
+    e.preventDefault();
+    
+    if (isEditing) {
+      // Update role permissions
+      updateRolePermissions(selectedRole, selectedPermissions);
+    } else {
+      // Create new role
+      createRole(roleName, selectedPermissions);
+    }
+    
+    setRoleModalOpen(false);
+  };
+  
+  // Handle edit role
+  const handleEditRole = (role) => {
+    setSelectedRole(role);
+    setRoleName(role);
+    setSelectedPermissions(rolePermissions[role] || []);
+    setIsEditing(true);
+    setRoleModalOpen(true);
+  };
+  
+  // Handle delete role click
+  const handleDeleteRoleClick = (role) => {
+    setSelectedRole(role);
+    setDeleteModalOpen(true);
+  };
+  
+  // Handle delete role
+  const handleDeleteRole = () => {
+    if (selectedRole) {
+      deleteRole(selectedRole);
+      setDeleteModalOpen(false);
+    }
+  };
+  
+  // Get permission display name
+  const getPermissionDisplayName = (permission) => {
+    return permission
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  };
+  
+  return (
+    <div>
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2>Roles & Permissions</h2>
+        <Button onClick={() => setRoleModalOpen(true)}>Add New Role</Button>
+      </div>
+      
+      <div className="row">
+        {Object.keys(rolePermissions).map(role => (
+          <div key={role} className="col-md-6 mb-4">
+            <Card>
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h3 className={`role-badge role-${role}`}>{getRoleDisplayName(role)}</h3>
+                <div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="mr-2"
+                    onClick={() => handleEditRole(role)}
+                  >
+                    Edit
+                  </Button>
+                  
+                  {/* Don't allow deleting core roles */}
+                  {!['admin', 'writer', 'reader'].includes(role) && (
+                    <Button 
+                      variant="danger" 
+                      size="sm"
+                      onClick={() => handleDeleteRoleClick(role)}
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </div>
+              </div>
+              
+              <div>
+                <h5>Permissions:</h5>
+                <ul className="list-unstyled">
+                  {rolePermissions[role]?.map(permission => (
+                    <li key={permission} className="mb-1">
+                      <span className="text-success mr-2">✓</span>
+                      {getPermissionDisplayName(permission)}
+                    </li>
+                  ))}
+                  
+                  {rolePermissions[role]?.length === 0 && (
+                    <li className="text-muted">No permissions assigned</li>
+                  )}
+                </ul>
+              </div>
+            </Card>
+          </div>
+        ))}
+      </div>
+      
+      {/* Role Modal */}
+      <Modal
+        isOpen={roleModalOpen}
+        onClose={() => setRoleModalOpen(false)}
+        title={isEditing ? `Edit Role: ${getRoleDisplayName(selectedRole)}` : 'Add New Role'}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRoleModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="roleForm">
+              {isEditing ? 'Update Role' : 'Add Role'}
+            </Button>
+          </>
+        }
+      >
+        <form id="roleForm" onSubmit={handleFormSubmit}>
+          {!isEditing && (
+            <Input 
+              label="Role Name"
+              value={roleName}
+              onChange={(e) => setRoleName(e.target.value)}
+              placeholder="Enter role name"
+              required
+            />
+          )}
+          
+          <div className="mt-3">
+            <label className="form-label">Permissions</label>
+            
+            {Object.entries(permissionCategories).map(([category, permissions]) => (
+              <div key={category} className="mb-3">
+                <h5>{category}</h5>
+                
+                {permissions.map(permission => (
+                  <div key={permission} className="form-check mb-2">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      id={permission}
+                      checked={selectedPermissions.includes(permission)}
+                      onChange={() => handlePermissionToggle(permission)}
+                    />
+                    <label className="form-check-label" htmlFor={permission}>
+                      {getPermissionDisplayName(permission)}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </form>
+      </Modal>
+      
+      {/* Delete Role Modal */}
+      <Modal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        title="Delete Role"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDeleteRole}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>Are you sure you want to delete the role "{getRoleDisplayName(selectedRole)}"?</p>
+        <p>Users with this role will be changed to the default Reader role. This action cannot be undone.</p>
+      </Modal>
+    </div>
+  );
+};
+
+// Admin Settings component
+const AdminSettings = () => {
+  const { settings, updateSettings, ROLES } = useAppContext();
+  
+  // Form state
+  const {
+    values,
+    handleChange,
+    handleSubmit,
+    isSubmitting
+  } = useForm(
+    { ...settings },
+    () => ({})
+  );
+  
+  // Handle form submission
+  const onSubmit = (values, done) => {
+    updateSettings(values);
+    done();
+  };
+  
+  // Role options for default user role
+  const roleOptions = Object.keys(ROLES).map(role => ({
+    value: ROLES[role],
+    label: getRoleDisplayName(ROLES[role])
+  }));
+  
+  return (
+    <div>
+      <h2 className="mb-4">Site Settings</h2>
+      
+      <Card>
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <div className="row">
+            <div className="col-md-6">
+              <Input 
+                label="Site Name"
+                name="siteName"
+                value={values.siteName}
+                onChange={handleChange}
+              />
+            </div>
+            
+            <div className="col-md-6">
+              <Input 
+                label="Logo URL"
+                name="logoUrl"
+                value={values.logoUrl}
+                onChange={handleChange}
+                placeholder="Leave blank to use site name"
+              />
+            </div>
+          </div>
+          
+          <Textarea 
+            label="Site Description"
+            name="siteDescription"
+            value={values.siteDescription}
+            onChange={handleChange}
+          />
+          
+          <div className="row">
+            <div className="col-md-6">
+              <Checkbox 
+                label="Allow User Registration"
+                name="allowRegistration"
+                checked={values.allowRegistration}
+                onChange={(e) => handleChange({
+                  target: {
+                    name: 'allowRegistration',
+                    value: e.target.checked
+                  }
+                })}
+              />
+            </div>
+            
+            <div className="col-md-6">
+              <Checkbox 
+                label="Require Email Verification"
+                name="requireEmailVerification"
+                checked={values.requireEmailVerification}
+                onChange={(e) => handleChange({
+                  target: {
+                    name: 'requireEmailVerification',
+                    value: e.target.checked
+                  }
+                })}
+              />
+            </div>
+          </div>
+          
+          <div className="row">
+            <div className="col-md-6">
+              <Checkbox 
+                label="Enable Comments"
+                name="enableComments"
+                checked={values.enableComments}
+                onChange={(e) => handleChange({
+                  target: {
+                    name: 'enableComments',
+                    value: e.target.checked
+                  }
+                })}
+              />
+            </div>
+            
+            <div className="col-md-6">
+              <Input 
+                label="Articles Per Page"
+                name="articlesPerPage"
+                type="number"
+                min="1"
+                max="50"
+                value={values.articlesPerPage}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+          
+          <Select 
+            label="Default User Role"
+            name="defaultUserRole"
+            value={values.defaultUserRole}
+            onChange={handleChange}
+            options={roleOptions}
+          />
+          
+          <Button 
+            type="submit" 
+            className="mt-3" 
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? <Spinner size="sm" /> : 'Save Settings'}
+          </Button>
+        </form>
+      </Card>
     </div>
   );
 };
@@ -3973,6 +5810,22 @@ const sampleUsers = [
   },
   {
     id: '3',
+    name: 'Editor User',
+    email: 'editor@example.com',
+    password: 'password123',
+    role: 'editor',
+    createdAt: '2023-01-02T00:00:00.000Z'
+  },
+  {
+    id: '4',
+    name: 'Moderator User',
+    email: 'moderator@example.com',
+    password: 'password123',
+    role: 'moderator',
+    createdAt: '2023-01-03T00:00:00.000Z'
+  },
+  {
+    id: '5',
     name: 'Reader User',
     email: 'reader@example.com',
     password: 'password123',
@@ -4067,7 +5920,8 @@ Now that you have a basic understanding of React, you can:
 
 1. Learn more about [React hooks](https://reactjs.org/docs/hooks-intro.html)
 2. Explore [React Router](https://reactrouter.com/) for handling routing
-3. Check out [Redux](https://redux.js.org/) for state management
+3. Check out [
+Redux](https://redux.js.org/) for state management
 4. Learn about [server-side rendering](https://nextjs.org/) with Next.js
 
 Happy coding!
@@ -4438,6 +6292,151 @@ By following these practices, you'll create a robust test suite that gives you c
     updatedAt: '2023-03-05T00:00:00.000Z',
     likes: 42,
     views: 310
+  },
+  {
+    id: '4',
+    title: 'Introduction to Docker for Web Developers',
+    content: `
+# Introduction to Docker for Web Developers
+
+Docker has revolutionized how developers build, package, and deploy applications. This guide will introduce Docker concepts for web developers.
+
+## What is Docker?
+
+Docker is a platform that allows you to develop, deploy, and run applications in containers. Unlike virtual machines, containers are lightweight and share the host system's kernel.
+
+## Key Benefits
+
+- **Consistency**: Works the same across all environments
+- **Isolation**: Applications run in isolated environments
+- **Efficiency**: Uses fewer resources than VMs
+- **Scalability**: Easy to scale horizontally
+
+## Getting Started
+
+First, [install Docker](https://docs.docker.com/get-docker/) for your operating system.
+
+## Basic Docker Concepts
+
+### Images
+
+An image is a read-only template with instructions for creating a Docker container. Think of it as a snapshot of an application and its environment.
+
+### Containers
+
+A container is a runnable instance of an image. You can create, start, stop, move, or delete containers.
+
+### Dockerfile
+
+A Dockerfile is a text document containing all the commands needed to build an image.
+
+## Creating a Dockerfile
+
+Here's a simple Dockerfile for a Node.js application:
+
+\`\`\`dockerfile
+# Use Node.js LTS version
+FROM node:16
+
+# Set working directory
+WORKDIR /app
+
+# Copy package.json and package-lock.json
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy application code
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# Start the application
+CMD ["npm", "start"]
+\`\`\`
+
+## Building and Running an Image
+
+Build your Docker image:
+
+\`\`\`bash
+docker build -t my-node-app .
+\`\`\`
+
+Run a container from your image:
+
+\`\`\`bash
+docker run -p 3000:3000 my-node-app
+\`\`\`
+
+## Docker Compose
+
+Docker Compose helps manage multi-container applications. Create a \`docker-compose.yml\` file:
+
+\`\`\`yaml
+version: '3'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+  db:
+    image: mongo
+    volumes:
+      - mongodb_data:/data/db
+volumes:
+  mongodb_data:
+\`\`\`
+
+Run your multi-container application:
+
+\`\`\`bash
+docker-compose up
+\`\`\`
+
+## Best Practices
+
+1. **Use specific image versions**: Avoid using \`latest\` tag
+2. **Minimize layers**: Combine RUN commands where possible
+3. **Use .dockerignore**: Exclude unnecessary files
+4. **Multi-stage builds**: Reduce final image size
+5. **Non-root user**: Run containers as non-root when possible
+
+## Debugging Docker Containers
+
+View running containers:
+
+\`\`\`bash
+docker ps
+\`\`\`
+
+View logs:
+
+\`\`\`bash
+docker logs <container_id>
+\`\`\`
+
+Execute commands inside the container:
+
+\`\`\`bash
+docker exec -it <container_id> bash
+\`\`\`
+
+## Conclusion
+
+Docker simplifies development and deployment workflows by ensuring consistency across environments. As a web developer, mastering Docker will make your development process more efficient and deployments more reliable.
+    `,
+    tags: ['Docker', 'DevOps', 'Web Development'],
+    userId: '3',
+    author: 'Editor User',
+    createdAt: '2023-04-10T00:00:00.000Z',
+    updatedAt: '2023-04-10T00:00:00.000Z',
+    likes: 35,
+    views: 280
   }
 ];
 
@@ -4446,7 +6445,7 @@ const sampleComments = [
   {
     id: '1',
     articleId: '1',
-    userId: '3',
+    userId: '5',
     author: 'Reader User',
     content: 'This was very helpful! I\'ve been struggling with React but this makes it clearer.',
     createdAt: '2023-02-02T12:00:00.000Z'
@@ -4470,7 +6469,7 @@ const sampleComments = [
   {
     id: '4',
     articleId: '3',
-    userId: '3',
+    userId: '5',
     author: 'Reader User',
     content: 'Testing has always been a pain point for me. This article makes it much more approachable.',
     createdAt: '2023-03-06T10:20:00.000Z'
@@ -4482,6 +6481,22 @@ const sampleComments = [
     author: 'Admin User',
     content: 'Would love to see a follow-up on integration testing with Cypress!',
     createdAt: '2023-03-07T14:10:00.000Z'
+  },
+  {
+    id: '6',
+    articleId: '4',
+    userId: '4',
+    author: 'Moderator User',
+    content: 'Docker is a must-know technology these days. Great intro article for beginners!',
+    createdAt: '2023-04-11T09:15:00.000Z'
+  },
+  {
+    id: '7',
+    articleId: '4',
+    userId: '3',
+    author: 'Editor User',
+    content: 'Thanks for the feedback! I\'m planning a follow-up article on Docker Compose for microservices.',
+    createdAt: '2023-04-12T11:30:00.000Z'
   }
 ];
 
@@ -4493,7 +6508,10 @@ const sampleTags = [
   { id: '4', name: 'TypeScript', count: 1 },
   { id: '5', name: 'Programming', count: 1 },
   { id: '6', name: 'Testing', count: 1 },
-  { id: '7', name: 'Jest', count: 1 }
+  { id: '7', name: 'Jest', count: 1 },
+  { id: '8', name: 'Docker', count: 1 },
+  { id: '9', name: 'DevOps', count: 1 },
+  { id: '10', name: 'Web Development', count: 1 }
 ];
 
 // ==============================================
@@ -4515,6 +6533,7 @@ const App = () => {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
                 <Route path="/tags" element={<TagsPage />} />
+                <Route path="/about" element={<AboutPage />} />
                 
                 <Route 
                   path="/profile" 
@@ -4526,29 +6545,38 @@ const App = () => {
                 />
                 
                 <Route 
+                  path="/my-articles" 
+                  element={
+                    <ProtectedRoute>
+                      <MyArticlesPage />
+                    </ProtectedRoute>
+                  } 
+                />
+                
+                <Route 
                   path="/articles/new" 
                   element={
-                    <WriterRoute>
+                    <PermissionRoute permission={PERMISSIONS.CREATE_ARTICLE}>
                       <CreateArticlePage />
-                    </WriterRoute>
+                    </PermissionRoute>
                   } 
                 />
                 
                 <Route 
                   path="/articles/:id/edit" 
                   element={
-                    <WriterRoute>
+                    <PermissionRoute permission={PERMISSIONS.EDIT_OWN_ARTICLE}>
                       <EditArticlePage />
-                    </WriterRoute>
+                    </PermissionRoute>
                   } 
                 />
                 
                 <Route 
                   path="/admin" 
                   element={
-                    <AdminRoute>
-                      <AdminPage />
-                    </AdminRoute>
+                    <PermissionRoute permission={PERMISSIONS.MANAGE_USERS}>
+                      <AdminDashboard />
+                    </PermissionRoute>
                   } 
                 />
                 
@@ -4565,6 +6593,43 @@ const App = () => {
   );
 };
 
+// About Page component
+const AboutPage = () => {
+  const { settings } = useAppContext();
+  
+  return (
+    <div className="container">
+      <div className="row justify-content-center">
+        <div className="col-md-8">
+          <Card className="mt-4">
+            <h1 className="mb-4">About {settings.siteName}</h1>
+            
+            <p>{settings.siteDescription}</p>
+            
+            <h3 className="mt-4">Our Mission</h3>
+            <p>
+              Our mission is to create a platform where developers and tech enthusiasts can share knowledge, 
+              insights, and experiences. We believe in the power of community-driven learning and aim to 
+              provide a space for quality technical content.
+            </p>
+            
+            <h3 className="mt-4">Join Our Community</h3>
+            <p>
+              We welcome contributors of all levels of experience. Whether you're a seasoned developer 
+              or just starting your journey in tech, your perspective matters.
+            </p>
+            
+            <div className="mt-4">
+              <Link to="/register" className="btn btn-primary">Join Now</Link>
+              <Link to="/login" className="btn btn-outline ml-3">Login</Link>
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ==============================================
 // RENDER THE APP
 // ==============================================
@@ -4578,3 +6643,5 @@ document.head.appendChild(styleElement);
 const rootElement = document.getElementById('root');
 const root = createRoot(rootElement);
 root.render(<App />);
+
+export default App;
