@@ -4,7 +4,7 @@ import { HashRouter as Router, Routes, Route, Link, useParams, useNavigate, Navi
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
-import jwt_decode from 'jwt-decode';
+import {jwtDecode as jwt_decode} from 'jwt-decode';
 import { v4 as uuidv4 } from 'uuid';
 
 // ==============================================
